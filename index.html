@@ -364,6 +364,23 @@
                 align-items: center;
             }
         }
+        
+        /* Loading spinner */
+        .loading-spinner {
+            border: 3px solid rgba(212, 175, 55, 0.3);
+            border-radius: 50%;
+            border-top: 3px solid #d4af37;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            margin-right: 10px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
@@ -382,7 +399,7 @@
                 </p>
                 
                 <div class="controls">
-                    <button id="startBtn" class="start-btn" onclick="testFlow()">
+                    <button id="startBtn" class="start-btn" onclick="startBooking()">
                         🎤 Start Booking
                     </button>
                     
@@ -425,135 +442,319 @@
         import { UltravoxSession } from 'https://esm.sh/ultravox-client';
         
         let currentSession = null;
+        let connectionAttempts = 0;
+        const maxConnectionAttempts = 3;
         
-        window.testFlow = async function() {
+        // ✅ Improved start booking function with better error handling
+        window.startBooking = async function() {
             const status = document.getElementById('status');
             const startBtn = document.getElementById('startBtn');
             const endBtn = document.getElementById('endBtn');
             
             try {
+                // ✅ Clean up any existing session first
+                await cleanupExistingSession();
+                
                 startBtn.disabled = true;
-                status.innerHTML = '✨ Connecting to Le Atmos booking system...';
+                status.innerHTML = '<span class="loading-spinner"></span>Connecting to Le Atmos booking system...';
                 status.classList.add('active');
                 
-                // Call your local Python server
-                const response = await fetch('http://localhost:5000/salon-booking', {
-                    method: 'POST',
-                    headers: { 
-                        'Content-Type': 'application/json',
-                        'Accept': 'application/json'
-                    },
-                    body: JSON.stringify({ 
-                        test: 'voice_test', 
-                        timestamp: new Date().toISOString() 
-                    })
-                });
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                }
-                
-                const data = await response.json();
-                console.log('Server Response:', data);
+                // ✅ Call backend with retry logic
+                const data = await callBackendWithRetry();
                 
                 if (!data.success) {
                     throw new Error(data.message || 'Booking system connection failed');
                 }
                 
-                status.innerHTML = '🎤 Connecting you to Monika...';
+                // ✅ Extract join URL with multiple fallbacks
+                const joinUrl = data.join_url || data.call_data?.joinUrl || data.joinUrl;
+                
+                if (!joinUrl) {
+                    throw new Error('No join URL received from server');
+                }
+                
+                console.log('✅ Received join URL:', joinUrl);
+                
+                status.innerHTML = '<span class="loading-spinner"></span>Connecting you to Monika...';
+                
+                // ✅ Create and setup Ultravox session
+                await setupUltravoxSession(joinUrl);
+                
                 endBtn.disabled = false;
-                
-                // Create Ultravox session
-                currentSession = new UltravoxSession();
-                
-                currentSession.addEventListener('status', (event) => {
-                    console.log('Status:', event.status);
-                    
-                    switch(event.status) {
-                        case 'connected':
-                            status.innerHTML = '✨ Connected! Monika is ready to help you.<br><small>Try: "Namaste Monika, main appointment book karna chahta/chahti hoon"</small>';
-                            endBtn.disabled = false;
-                            document.getElementById('transcript').style.display = 'block';
-                            break;
-                        case 'disconnected':
-                            status.innerHTML = '👋 Thank you for choosing Le Atmos. Ready for a new booking.';
-                            status.classList.remove('active');
-                            resetButtons();
-                            break;
-                        case 'connecting':
-                            status.innerHTML = '🔄 Establishing secure connection...';
-                            break;
-                        case 'thinking':
-                            status.innerHTML = '💭 Monika is processing your request...';
-                            break;
-                        case 'speaking':
-                            status.innerHTML = '🗣️ Monika is speaking...';
-                            break;
-                        case 'listening':
-                            status.innerHTML = '👂 Monika is listening to you...';
-                            break;
-                    }
-                });
-                
-                currentSession.addEventListener('transcripts', (event) => {
-                    if (event.text && event.isFinal) {
-                        console.log('Transcript:', event);
-                        addTranscript(event.speaker, event.text);
-                    }
-                });
-                
-                currentSession.addEventListener('error', (event) => {
-                    console.error('Session error:', event);
-                    status.innerHTML = `⚠️ Connection issue: ${event.message || 'Please try again'}`;
-                    status.classList.remove('active');
-                    resetButtons();
-                });
-                
-                // Connect to Monika
-                await currentSession.joinCall(data.joinUrl);
-                console.log('Connected to Monika!');
+                connectionAttempts = 0; // Reset on success
                 
             } catch (error) {
-                console.error('Connection failed:', error);
+                console.error('❌ Connection failed:', error);
                 status.innerHTML = `⚠️ Unable to connect: ${error.message}`;
                 status.classList.remove('active');
                 resetButtons();
+                
+                // ✅ Auto-retry on certain errors
+                if (connectionAttempts < maxConnectionAttempts && 
+                    (error.message.includes('400') || error.message.includes('BAD REQUEST'))) {
+                    connectionAttempts++;
+                    console.log(`🔄 Auto-retry attempt ${connectionAttempts}/${maxConnectionAttempts} in 3 seconds...`);
+                    status.innerHTML = `🔄 Retrying connection... (${connectionAttempts}/${maxConnectionAttempts})`;
+                    setTimeout(() => startBooking(), 3000);
+                }
             }
         }
         
-        window.endCall = function() {
+        // ✅ Clean up existing session properly
+        async function cleanupExistingSession() {
             if (currentSession) {
-                currentSession.leaveCall();
+                try {
+                    console.log('🧹 Cleaning up previous session...');
+                    currentSession.leaveCall();
+                    currentSession = null;
+                    
+                    // Clear transcript from previous session
+                    const transcriptContent = document.getElementById('transcriptContent');
+                    transcriptContent.innerHTML = '';
+                    document.getElementById('transcript').style.display = 'none';
+                    
+                    // Wait a moment for cleanup
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                } catch (e) {
+                    console.log('⚠️ Previous session cleanup warning:', e.message);
+                }
+            }
+        }
+        
+        // ✅ Call backend with retry logic
+        async function callBackendWithRetry() {
+            let lastError;
+            
+            for (let attempt = 1; attempt <= 3; attempt++) {
+                try {
+                    console.log(`📞 Backend call attempt ${attempt}/3`);
+                    
+                    const response = await fetch('http://localhost:5000/salon-booking', {
+                        method: 'POST',
+                        headers: { 
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json'
+                        },
+                        body: JSON.stringify({ 
+                            test: 'voice_test', 
+                            timestamp: new Date().toISOString(),
+                            attempt: attempt,
+                            session_cleanup: true
+                        })
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                    
+                    const data = await response.json();
+                    console.log('✅ Backend response:', data);
+                    return data;
+                    
+                } catch (error) {
+                    console.log(`❌ Backend attempt ${attempt} failed:`, error.message);
+                    lastError = error;
+                    
+                    // Wait before retry (except on last attempt)
+                    if (attempt < 3) {
+                        const waitTime = attempt * 1000; // 1s, 2s
+                        console.log(`⏳ Waiting ${waitTime}ms before retry...`);
+                        await new Promise(resolve => setTimeout(resolve, waitTime));
+                    }
+                }
+            }
+            
+            throw lastError;
+        }
+        
+        // ✅ Setup Ultravox session with proper event handling
+        async function setupUltravoxSession(joinUrl) {
+            return new Promise((resolve, reject) => {
+                const status = document.getElementById('status');
+                let sessionConnected = false;
+                let connectionTimeout;
+                
+                // ✅ Set connection timeout
+                connectionTimeout = setTimeout(() => {
+                    if (!sessionConnected) {
+                        reject(new Error('Connection timeout - please try again'));
+                    }
+                }, 15000); // 15 second timeout
+                
+                try {
+                    currentSession = new UltravoxSession();
+                    
+                    // ✅ Enhanced status event handling
+                    currentSession.addEventListener('status', (event) => {
+                        console.log('📊 Session Status:', event.status);
+                        
+                        switch(event.status) {
+                            case 'connected':
+                                sessionConnected = true;
+                                clearTimeout(connectionTimeout);
+                                status.innerHTML = '✨ Connected! Monika is ready to help you.<br><small>Try: "Hello Monika, I want to book an appointment"</small>';
+                                status.classList.remove('active');
+                                document.getElementById('transcript').style.display = 'block';
+                                resolve();
+                                break;
+                                
+                            case 'disconnected':
+                                status.innerHTML = '👋 Thank you for choosing Le Atmos. Ready for a new booking.';
+                                status.classList.remove('active');
+                                resetButtons();
+                                break;
+                                
+                            case 'connecting':
+                                status.innerHTML = '<span class="loading-spinner"></span>Establishing secure connection...';
+                                break;
+                                
+                            case 'thinking':
+                                status.innerHTML = '💭 Monika is processing your request...';
+                                break;
+                                
+                            case 'speaking':
+                                status.innerHTML = '🗣️ Monika is speaking...';
+                                break;
+                                
+                            case 'listening':
+                                status.innerHTML = '👂 Monika is listening to you...';
+                                break;
+                                
+                            case 'idle':
+                                status.innerHTML = '⏸️ Ready to listen - speak anytime...';
+                                break;
+                                
+                            default:
+                                status.innerHTML = `🔄 Status: ${event.status}`;
+                        }
+                    });
+                    
+                    // ✅ Enhanced transcript handling
+                    currentSession.addEventListener('transcripts', (event) => {
+                        if (event.text && event.isFinal) {
+                            console.log('📝 Transcript:', event);
+                            addTranscript(event.speaker, event.text);
+                        }
+                    });
+                    
+                    // ✅ Enhanced error handling
+                    currentSession.addEventListener('error', (event) => {
+                        console.error('❌ Session error:', event);
+                        clearTimeout(connectionTimeout);
+                        
+                        let errorMessage = event.message || event.error || 'Unknown connection error';
+                        
+                        // ✅ Provide specific error messages
+                        if (errorMessage.includes('WebSocket')) {
+                            errorMessage = 'Network connection issue - please check your internet';
+                        } else if (errorMessage.includes('timeout')) {
+                            errorMessage = 'Connection timeout - please try again';
+                        } else if (errorMessage.includes('403') || errorMessage.includes('401')) {
+                            errorMessage = 'Authentication error - please refresh and try again';
+                        }
+                        
+                        status.innerHTML = `⚠️ Connection issue: ${errorMessage}`;
+                        status.classList.remove('active');
+                        resetButtons();
+                        reject(new Error(errorMessage));
+                    });
+                    
+                    // ✅ Connect to Monika
+                    console.log('🔌 Attempting to join call...');
+                    currentSession.joinCall(joinUrl);
+                    
+                } catch (error) {
+                    clearTimeout(connectionTimeout);
+                    console.error('❌ Session setup error:', error);
+                    reject(error);
+                }
+            });
+        }
+        
+        // ✅ Improved end call function
+        window.endCall = function() {
+            console.log('🛑 Ending call...');
+            
+            if (currentSession) {
+                try {
+                    currentSession.leaveCall();
+                } catch (e) {
+                    console.log('⚠️ Error ending call:', e.message);
+                }
                 currentSession = null;
             }
             
-            document.getElementById('status').innerHTML = '👋 Call ended. Thank you for choosing Le Atmos.';
-            document.getElementById('status').classList.remove('active');
+            const status = document.getElementById('status');
+            status.innerHTML = '👋 Call ended. Thank you for choosing Le Atmos.';
+            status.classList.remove('active');
             resetButtons();
+            
+            // Hide transcript
+            document.getElementById('transcript').style.display = 'none';
         }
         
+        // ✅ Reset button states
         function resetButtons() {
             document.getElementById('startBtn').disabled = false;
             document.getElementById('endBtn').disabled = true;
+            connectionAttempts = 0;
         }
         
+        // ✅ Enhanced transcript display
         function addTranscript(speaker, text) {
             const transcriptContent = document.getElementById('transcriptContent');
             const entry = document.createElement('div');
             entry.className = `transcript-entry ${speaker}-transcript`;
             
-            const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            const timestamp = new Date().toLocaleTimeString([], { 
+                hour: '2-digit', 
+                minute: '2-digit',
+                second: '2-digit'
+            });
             const speakerName = speaker === 'user' ? 'You' : 'Monika';
             
-            entry.innerHTML = `<strong>${timestamp} - ${speakerName}:</strong> ${text}`;
+            // ✅ Clean up text and add proper formatting
+            const cleanText = text.trim();
+            entry.innerHTML = `<strong>${timestamp} - ${speakerName}:</strong> ${cleanText}`;
+            
             transcriptContent.appendChild(entry);
             
-            // Scroll to bottom
-            transcriptContent.scrollTop = transcriptContent.scrollHeight;
+            // ✅ Auto-scroll to bottom with smooth behavior
+            transcriptContent.scrollTo({
+                top: transcriptContent.scrollHeight,
+                behavior: 'smooth'
+            });
+            
+            // ✅ Limit transcript entries to prevent memory issues
+            const entries = transcriptContent.querySelectorAll('.transcript-entry');
+            if (entries.length > 50) {
+                entries[0].remove();
+            }
         }
         
-        // Add greeting message
-        console.log('Le Atmos booking system ready');
+        // ✅ Cleanup on page unload
+        window.addEventListener('beforeunload', function() {
+            if (currentSession) {
+                try {
+                    currentSession.leaveCall();
+                } catch (e) {
+                    console.log('Cleanup warning:', e.message);
+                }
+            }
+        });
+        
+        // ✅ Handle page visibility changes
+        document.addEventListener('visibilitychange', function() {
+            if (document.hidden && currentSession) {
+                console.log('📱 Page hidden - maintaining connection...');
+            } else if (!document.hidden && currentSession) {
+                console.log('📱 Page visible - connection active');
+            }
+        });
+        
+        // ✅ Initialize
+        console.log('🎉 Le Atmos booking system ready');
+        console.log('🔧 Enhanced with session management and error handling');
     </script>
 </body>
 </html>

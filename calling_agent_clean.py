@@ -803,24 +803,23 @@ class UltravoxAgent:
     def create_call(self, system_prompt: str, tools: List[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Create Ultravox call with enhanced salon context"""
         
+        # Fix the headers - Use X-API-Key instead of Bearer
         headers = {
-            "Authorization": f"Bearer {self.api_key}",
+            "X-API-Key": self.api_key,  # ✅ Correct format for Ultravox
             "Content-Type": "application/json"
         }
         
         call_config = {
             "systemPrompt": system_prompt,
-            "model": "ultravox-v0_3",
-            "voice": "terrence",
-            "temperature": 0.7,
-            "maxDuration": 600,  # 10 minutes max
-            "recordingEnabled": True,
-            "transcriptionEnabled": True
+            "model": "fixie-ai/ultravox",  # ✅ Use the correct model name
+            "voice": "87edb04c-06d4-47c2-bd94-683bc47e8fbe",  # ✅ Use correct voice ID
+            "maxDuration": "300s",  # ✅ String format, not integer
+            "firstSpeaker": "FIRST_SPEAKER_AGENT"  # ✅ Add this field
         }
         
-        # Add tools if provided
-        if tools:
-            call_config["tools"] = tools
+        # Remove tools for now - they might not be supported in the same way
+        # if tools:
+        #     call_config["tools"] = tools
         
         try:
             response = requests.post(
@@ -830,7 +829,11 @@ class UltravoxAgent:
                 timeout=30
             )
             
-            if response.status_code == 201:
+            print(f"🔍 Response Status: {response.status_code}")
+            print(f"🔍 Response Headers: {dict(response.headers)}")
+            print(f"🔍 Response Text: {response.text}")
+            
+            if response.status_code in [200, 201]:
                 return {
                     "success": True,
                     "call_data": response.json(),
@@ -849,7 +852,6 @@ class UltravoxAgent:
                 "error": "Network Error",
                 "message": str(e)
             }
-
 
 # Initialize global services
 salon_service = SalonBookingService()
@@ -965,6 +967,7 @@ def salon_booking():
             "error": "Server Error",
             "message": str(e)
         }), 500
+        
 
 
 @app.route('/check-availability', methods=['POST'])
