@@ -1,6 +1,8 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Le Atmos - Luxury Salon Voice Booking</title>
     <style>
         * {
@@ -375,7 +377,7 @@
             <div class="card-content">
                 <h2>✨ Book Your Appointment</h2>
                 <p class="intro-text">
-                    Experience personalized beauty services with Monica, our AI concierge. 
+                    Experience personalized beauty services with Monika, our AI concierge. 
                     Simply speak naturally to schedule your perfect salon visit.
                 </p>
                 
@@ -390,11 +392,11 @@
                 </div>
                 
                 <div id="status">
-                    Welcome to Le Atmos. Click "Start Booking" to connect with Luna.
+                    Welcome to Le Atmos. Click "Start Booking" to connect with Monika.
                 </div>
                 
                 <div id="transcript" class="transcript">
-                    <h4>💬 Conversation with Luna</h4>
+                    <h4>💬 Conversation with Monika</h4>
                     <div id="transcriptContent"></div>
                 </div>
                 
@@ -434,21 +436,31 @@
                 status.innerHTML = '✨ Connecting to Le Atmos booking system...';
                 status.classList.add('active');
                 
-                // Test your n8n automation
-                const response = await fetch('https://akshatpdpu.app.n8n.cloud/webhook-test/salon-booking', {
+                // Call your local Python server
+                const response = await fetch('http://localhost:5000/salon-booking', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ test: 'voice_test', timestamp: new Date().toISOString() })
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify({ 
+                        test: 'voice_test', 
+                        timestamp: new Date().toISOString() 
+                    })
                 });
                 
-                const data = await response.json();
-                console.log('n8n Response:', data);
-                
-                if (!data.success) {
-                    throw new Error('Booking system connection failed');
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
                 
-                status.innerHTML = '🎤 Connecting you to Luna...';
+                const data = await response.json();
+                console.log('Server Response:', data);
+                
+                if (!data.success) {
+                    throw new Error(data.message || 'Booking system connection failed');
+                }
+                
+                status.innerHTML = '🎤 Connecting you to Monika...';
                 endBtn.disabled = false;
                 
                 // Create Ultravox session
@@ -459,7 +471,7 @@
                     
                     switch(event.status) {
                         case 'connected':
-                            status.innerHTML = '✨ Connected! Luna is ready to help you.<br><small>Try: "Hi Luna, I\'d like to book a haircut"</small>';
+                            status.innerHTML = '✨ Connected! Monika is ready to help you.<br><small>Try: "Namaste Monika, main appointment book karna chahta/chahti hoon"</small>';
                             endBtn.disabled = false;
                             document.getElementById('transcript').style.display = 'block';
                             break;
@@ -472,13 +484,13 @@
                             status.innerHTML = '🔄 Establishing secure connection...';
                             break;
                         case 'thinking':
-                            status.innerHTML = '💭 Luna is processing your request...';
+                            status.innerHTML = '💭 Monika is processing your request...';
                             break;
                         case 'speaking':
-                            status.innerHTML = '🗣️ Luna is speaking...';
+                            status.innerHTML = '🗣️ Monika is speaking...';
                             break;
                         case 'listening':
-                            status.innerHTML = '👂 Luna is listening to you...';
+                            status.innerHTML = '👂 Monika is listening to you...';
                             break;
                     }
                 });
@@ -497,9 +509,9 @@
                     resetButtons();
                 });
                 
-                // Connect to Luna
+                // Connect to Monika
                 await currentSession.joinCall(data.joinUrl);
-                console.log('Connected to Luna!');
+                console.log('Connected to Monika!');
                 
             } catch (error) {
                 console.error('Connection failed:', error);
@@ -531,7 +543,7 @@
             entry.className = `transcript-entry ${speaker}-transcript`;
             
             const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            const speakerName = speaker === 'user' ? 'You' : 'Luna';
+            const speakerName = speaker === 'user' ? 'You' : 'Monika';
             
             entry.innerHTML = `<strong>${timestamp} - ${speakerName}:</strong> ${text}`;
             transcriptContent.appendChild(entry);
